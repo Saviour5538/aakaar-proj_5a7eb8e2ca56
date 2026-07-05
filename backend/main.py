@@ -1,0 +1,81 @@
+import os
+from datetime import datetime
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import ValidationError
+from fastapi.responses import JSONResponse
+from backend.routes.auth import router as auth_router
+from backend.routes.categories import router as categories_router
+from backend.routes.expenses import router as expenses_router
+from backend.routes.summary import router as summary_router
+from database.config import Base, get_db
+from sqlalchemy.exc import SQLAlchemyError
+
+# Initialize FastAPI app
+app = FastAPI(
+    title="SpendWise",
+    description="A web application for managing expenses and categories.",
+    version="1.0.0",
+)
+
+# Configure CORS middleware
+origins = os.getenv("CORS_ORIGINS", "http://localhost:3000").split(",")
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# Include routers
+app.include_router(auth_router, prefix="/api")
+app.include_router(categories_router, prefix="/api")
+app.include_router(expenses_router, prefix="/api")
+app.include_router(summary_router, prefix="/api")
+
+# Global exception handlers
+@app.exception_handler(HTTPException)
+async def http_exception_handler(request: Request, exc: HTTPException):
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={"detail": exc.detail},
+    )
+
+@app.exception_handler(ValidationError)
+async def validation_exception_handler(request: Request, exc: ValidationError):
+    return JSONResponse(
+        status_code=422,
+        content={"detail": exc.errors()},
+    )
+
+@app.exception_handler(Exception)
+async def general_exception_handler(request: Request, exc: Exception):
+    return JSONResponse(
+        status_code=500,
+        content={"detail": "An unexpected error occurred."},
+    )
+
+# Health check endpoint
+@app.get("/health")
+async def health_check():
+    return {"status": "ok", "timestamp": datetime.utcnow().isoformat()}
+
+# Lifespan context manager for startup/shutdown
+@app.on_event("startup")
+async def startup_event():
+    from database.config import engine as _aakaar_engine
+    from database.models import Base as _AakaarBase
+    _AakaarBase.metadata.create_all(bind=_aakaar_engine)
+    try:
+        # Initialize database
+        from database.config import get_db  # Corrected import to use get_db instead of init_db
+        db = next(get_db())
+        # Perform any necessary initialization with db
+    except SQLAlchemyError as e:
+        raise HTTPException(status_code=500, detail="Database initialization failed.")
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    # Perform any necessary cleanup here
+    pass
